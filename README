@@ -11,7 +11,7 @@ warlord_client:
   -p -- Change the port to the next argument
   -n -- Try to join the server with your name as the next argument
   -m -- Manual mode (takes plays from players)
-  -q -- Used for debugging (causes client to quit as soon as it confirms it has joined)
+  -q -- Used for debugging (client quits as soon as it confirms it has joined)
 
 warlord_server:
   -l -- The time between the lobby having enough to start a game and the game starting
