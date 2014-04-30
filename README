@@ -1,0 +1,19 @@
+A client and server written in Python.
+Written by Tyler Hanlon
+
+
+Currently provides minimal UI.
+
+~Commandline Arguments~
+
+warlord_client:
+  -s -- Change the host name/IP address to the next argument
+  -p -- Change the port to the next argument
+  -n -- Try to join the server with your name as the next argument
+  -m -- Manual mode (takes plays from players)
+  -q -- Used for debugging (causes client to quit as soon as it confirms it has joined)
+
+warlord_server:
+  -l -- The time between the lobby having enough to start a game and the game starting
+  -m -- Changes the minimum player number to the next argument
+  -t -- Changes the time allowed for a player to take on their turn before sending a strike
