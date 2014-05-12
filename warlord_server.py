@@ -10,31 +10,44 @@ import time
 size = 1024
 sstrikefile = open('server_strikes','a')
 
+#Client class
+#Contains information about clients the server is working with.
 class Client(object):
 	#constructor
 	def __init__(self, socket, name):
 		self.socket = socket
 		self.name = name
 		self.strikes = 0
-		self.status = "" #status : a = current turn, p = passed, w = ??, d = disconnected [to be disconnected], e = empty
+		self.status = "" #status : a = current turn, p = passed, w = skipped, 
+				 #d = disconnected [to be disconnected], e = empty
 		self.hand = []
-		self.rank = 0
+		self.rank = 0 #The order the client finished their hand. Higher numbers mean they went out earlier
 		self.outputBuffer = []
 		self.inputBuffer = ""
+		
+	#Adds a strike to the client. If the client strikes out, changes their status
 	def addStrike(self):
 		sstrikefile.write("Struck %s" %self.name)
 		self.strikes += 1
 		if self.strikes >= 3:
 		    self.status = "d"
-	def setPos(self,finish):
-		pos = finish
+	
+	#Sends a message (contained in 'message') to the client
 	def send(self,message):
 		self.socket.send(message)
+	
+	#Returns if the client is still active
+	#! Might be more efficient to just check the status, but this looks cleaner when reading for now
 	def active(self):
 		return self.strikes < 3
+	
+	#The client object sets itself up to be dropped
 	def drop(self):
-		while self.strikes < 3:
-		    self.strikes += 1
+		self.strikes = 3
+		self.status = "d"
+
+#strike
+#For a given client object, add one strike and send a strike message with the strikeCode number
 
 def strike(client,strikeCode):
 	if client.strikes < 3:
@@ -44,11 +57,13 @@ def strike(client,strikeCode):
 		if strikeCode / 10 in [1,7]:
 			chand(client)
 
-
+#cjoin
+#Responds to a received cjoin message. Tests to see if the included name
+#in the cjoin is legal,striking if it isn't. If it's legal but not available,
+#it will add on a number to the backend of the name to make it legal.
 
 def cjoin(client,message,used_names):
 	#regular expression to check name is legal
-	#TODO
 	test = re.compile("(\W)")
 	assign_name = message
 	nameEnd = len(test.sub("",message))
@@ -67,16 +82,22 @@ def cjoin(client,message,used_names):
 	used_names.append(assign_name)
 	client.name = assign_name
 
-#GAME LOGIC
+####### GAME LOGIC METHODS ########
+
+#shuffleDeck
+#Makes a new array of integers 0-51 and returns the shuffled array
+
 def shuffleDeck():
 	deck = []
 	for x in xrange(52):
 		deck.append(x)
-	#shuffle using swaps
 	random.shuffle(deck)
 	return deck
 
-#should be passed playerList where president is pos 0 and scumbag is pos numPlayers-1
+# deal
+# Given a list of players, it deals out the list as evenly as it can.
+# playerList should be an list of players with the president at pos 0 and the scumbag at pos numPlayers-1
+# Returns a list of client objects with their hands filled in.
 def deal(playerList,sr):
 	numPlayers = len(playerList)
 	for p in playerList:
@@ -101,7 +122,10 @@ def deal(playerList,sr):
 	return playerList
 
 
-#Assumes client is at table. Check before calling
+#chand
+#Server response to chand client message.
+#Sends the client's current hand as seen by the server to the client.
+
 def chand(client):
 #format list to be sent
 	message = ""
@@ -116,9 +140,13 @@ def chand(client):
 		message += str(52)+","
 	client.outputBuffer.append("[shand|%s]" %message[0:53])
 
-#returns value and quantity of cards played in a list
-#returns [cards played, T/F if next player is to be skipped]
-#TODO implement skip
+#cplay
+#The server's response to a cplay message
+#If the client sending the message is the currently active player, it checkes
+#that the play is legal and, if it is, checks if it warrents a skip.
+#returns [[cards played], T/F if next player is to be skipped]
+#i.e. returns the cards played in a list and a boolean if there's a skip
+
 def cplay(client,playCards,prevPlay,firstTurn):
 	if client.status != "a":
 		strike(client,15) #out of turn play
@@ -162,7 +190,7 @@ def cplay(client,playCards,prevPlay,firstTurn):
 				strike(client,13) # too few cards
 				return []
 			for c in cards:
-				if c != "52":
+				if c != "52": #pass/empty card
 					client.hand.remove(int(c))
 			client.status = "w"
 		elif firstTurn:
@@ -172,6 +200,9 @@ def cplay(client,playCards,prevPlay,firstTurn):
 			client.status = "p"
 		return [cards,skip]
 
+# slobb
+# Server sends out a message to all clients at the table and in the lobby
+# with the current player list in the lobby.
 def slobb(lobby,table):
 	num_clients = len(lobby)
 	n_c = ""
@@ -196,7 +227,12 @@ def slobb(lobby,table):
 	return body
 
 
-#TODO Include some way to check if there's already been an stabl sent
+# stabl
+# Sends out the current state of the table to all players at the table and in the lobby.
+# Message formatted as: [stable|playerInfo|lastPlay|startingRound?]
+# playerInfo = StatusStrikes:playerName:handSize	e.g. w2:Tyler   :10
+# lastPlay = ##,##,##,##
+# startingRound = 0 or 1, depending on whether or not it is the starting round [no rankings]
 def stabl(lobby,table,lastPlay,sr):
 	m1 = ""
 	m2 = ""
@@ -217,6 +253,9 @@ def stabl(lobby,table,lastPlay,sr):
 		if t.active():
 			t.outputBuffer.append("[stabl|%s|%s|%d]" %(m1[0:104],m2,sr))
 
+# cchat
+# Server response to cchat message.
+# Checks if the length is 62 characters or less and sends out client's message to the table and the lobby
 
 def cchat(client,message,lobby,table):
 	if len(message) > 63:
@@ -229,8 +268,13 @@ def cchat(client,message,lobby,table):
 		if t.active() : t.outputBuffer.append ("[schat|%s|%s]" %(client.name,message))
 
 
-#sets the status of any players that change status (just played, new hand). 
-#returns the hand to beat for the next player
+# nextPlayer
+# A game logic method.
+# Finds the player who will take the next turn given the number of players remaining
+# and the state of disconnects and skips.
+# Changes the table status's to reflect whose turn it is and any skips that were made.
+# Returns the next play to beat.
+
 def nextPlayer(table,index,lastPlay,prevPlay,skip):
 	if len(table) <= 1:
 		return [prevPlay]
@@ -277,6 +321,12 @@ def nextPlayer(table,index,lastPlay,prevPlay,skip):
 			table[next_player].status = "a"				
 			return prevPlay
 
+# startNewHand
+# Game logic method
+# Fills the table with up to 7 players from the lobby.
+# If it's not the starting round, sorts the table according to rank (higher is better).
+# Returns the new table, with hands fully dealt.
+
 def startNewHand(lobby,table,minPlayer,sr):
 
 	tsize = len(table)
@@ -287,7 +337,6 @@ def startNewHand(lobby,table,minPlayer,sr):
 			table.append(lobby.pop(0))
 			tsize += 1
 			lsize -=1
-			#organize by rank
 		organizedTable = []
 		if sr == 0:
 			#organize players by rank
@@ -304,8 +353,11 @@ def startNewHand(lobby,table,minPlayer,sr):
 		return []
 
 
-#Doesn't check for line endings...? Breaks if it finds them?
-#returns a regular expression group. If None, the message is invalid
+# validMessage
+# A regular expression checker for message received from clients.
+# If the message is invalid, it sends a strike.
+# Returns a regular expression group. If None, the message is invalid
+
 def validMessage(message,client):
 	#use regular expression to check if message is in proper format
 	#for cjoin, if illegal name just edit out illegal characters
@@ -333,7 +385,11 @@ def validMessage(message,client):
 
 
 
-#TODO ? prepare for incomplete messages/messages that weren't fully sent
+# splitMessages
+# Given a string, it will split the string into separate messages.
+# If a message was incomplete, stores it for later in the client's inputBuffer.
+# Returns a list of strings, each containing a full message
+
 def splitMessages(client):
 	inMess = client.inputBuffer
 	client.inputBuffer = ""
@@ -366,12 +422,8 @@ def splitMessages(client):
 		client.outputBuffer += " "*12 + "]"
 	return full_messages	
 
-#if messStart < messEnd or numStart == 0:
-#	client.incompMessage[0] += inMess[0:messEnd]
-#	inMess = inMess[messEnd+1:len(inMess)]
-#	full_messages.append(incompMessage.pop(0))
-#elif numEnd == 0:
-
+# handleArg
+# Handles commandline arguments, converting them to integers.
 
 def handleArg(argType):
         return{
@@ -380,6 +432,8 @@ def handleArg(argType):
         '-l':3,
         }.get(argType,0)
 
+# The main loop.
+# Builds the server and runs it.
 
 def main():
 	#sets up host socket
@@ -444,7 +498,10 @@ def main():
 	    try:
 		readList, writeList, emptyList = select.select(read,write,[])
 
-		#enters into a game
+##############################################################################################
+################################ Start a new hand ############################################
+##############################################################################################
+
 		if game[0]:
 			if newHand:
 				game[0] = False
@@ -518,11 +575,13 @@ def main():
 			startTimer[0] = threading.Timer(gameTime,gameStart)
 			startTimer[0].start()
 
-###############################################################################################################################
-#Should be a different method here
+##############################################################################################
+########################## Read messages from clients ########################################
+##############################################################################################
 
 #Read loop
 		for r in readList:
+			
 #read from commandline
 			if not loop:
 			    break
@@ -711,8 +770,12 @@ def main():
 								    strike(client,33)    
 						    else:
 							    strike(client,33)
-#					time.sleep(.5)
-#writes to lobby
+							    
+##############################################################################################
+############################ Send messages to clients ########################################
+##############################################################################################
+
+# Send messages to all lobby clients
 		for l in lobby:
 			if len(l.outputBuffer) > 0:
 				for w in writeList:
@@ -735,6 +798,7 @@ def main():
 						except socket.error:
 							l.status = "d"
 							l.outputBuffer = []
+							
 #drops people from the lobby if they need to be dropped
 		inLobby = len(lobby)
 		x = 0
@@ -754,7 +818,8 @@ def main():
 				x += 1
 		if deleted:
 			slobb(lobby,table)
-#writes to table
+			
+# Write loop for all clients at the table
 		for t in table:
 			if len(t.outputBuffer) > 0:
 #				print "%s %s %s" %(t.name, t.status, t.outputBuffer)
@@ -812,7 +877,10 @@ def main():
 			else:
 				x += 1
 
-#If a player times out
+##############################################################################################
+############################### Player timeouts ##############################################
+##############################################################################################
+
 		if pTimeout[0]:
 			#find player
 			#call nextPlayer(table,player,lastPlay,False)
@@ -845,6 +913,7 @@ def main():
 		print "Socket crashed where it shouldn't have. Whoops"
 	s.close()
 
+######################################################################################################
 
 #starts the program
 main()
