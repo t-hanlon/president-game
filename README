@@ -1,8 +1,7 @@
-A client and server written in Python.
+A procedural client and server written in Python.
 Written by Tyler Hanlon
 
 
-Currently provides minimal UI.
 
 ~Commandline Arguments~
 
